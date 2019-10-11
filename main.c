@@ -356,6 +356,7 @@ static void initialize(void) {
 	heroNode.scale[2] = 32.0F;
 	heroNode.collisionMaskPassive = ENEMY_BULLET_COLLISIONMASK | OBSTACLE_COLLISIONMASK;
 	heroNode.behaviour = heroBehaviour;
+	scene.camera.parent = &heroNode;
 	rayNode = initNode("ray", NO_IMAGE);
 	rayNode.shape = initShapeBox(3, 3, 512, RED);
 	rayNode.position[2] = 256.0F;
