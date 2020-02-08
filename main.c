@@ -5,7 +5,8 @@
 
 #include "./cnsglib/include/cnsg.h"
 
-#define SCREEN_SIZE 128
+#define WIDTH 512
+#define HEIGHT 256
 #define FRAME_PER_SECOND 60
 
 #define HERO_BULLET_COLLISIONMASK 0x01
@@ -22,24 +23,20 @@ static struct {
 
 static FontSJIS shnm12;
 
-static Controller keyboard;
-static ControllerEvent wasd[4], action, restart, quit;
 static float autoMove[2];
 static BOOL autoAction;
 
 static Image lifeBarBunch;
 static Image lifebarImage;
-static Image scoreImage;
 static Image hero;
 static Image heroBullet;
 static Image enemy1;
 static Image stage;
 static Image stoneImage;
-static Image gameoverImage;
-static Image startImage;
 static Image explosionImage;
 
 static Shape enemy1Shape;
+static Shape enemy1CollisionShape;
 static Shape enemyLifeShape;
 static Shape heroBulletShape;
 static Shape enemyBulletShape;
@@ -48,12 +45,13 @@ static Shape explosionShape;
 
 static Node lifeBarNode;
 static Node scoreNode;
-static Scene scene;
+static Scene gameScene;
 static Node heroNode;
 static Node rayNode;
 static Node stageNode;
 static Node gameoverNode;
 static Node startNode;
+static Node skyboxNode;
 
 BOOL start = TRUE;
 static unsigned int heroHP;
@@ -69,7 +67,7 @@ typedef struct {
 	Node *bar;
 } Enemy1;
 
-static void explosionInterval(Node *node) {
+static int explosionInterval(Node *node, void *data) {
 	Explosion *explosion = node->data;
 	if(explosion->i < 5) {
 		node->scale[0] += explosion->dx;
@@ -77,9 +75,10 @@ static void explosionInterval(Node *node) {
 		node->scale[2] += explosion->dx;
 		explosion->i += 1;
 	} else {
-		removeByData(&scene.nodes, node);
+		removeByData(&gameScene.nodes, node);
 		free(node);
 	}
+	return TRUE;
 }
 
 static void causeExplosion(float position[3], float radius) {
@@ -87,6 +86,7 @@ static void causeExplosion(float position[3], float radius) {
 	Explosion *explosion = calloc(sizeof(Explosion), 1);
 	*explosionNode = initNode("explosion", explosionImage);
 	explosionNode->shape = explosionShape;
+	explosionNode->collisionShape = explosionShape;
 	explosionNode->velocity[2] = -100.0F;
 	explosionNode->position[0] = position[0];
 	explosionNode->position[1] = position[1];
@@ -96,14 +96,14 @@ static void causeExplosion(float position[3], float radius) {
 	explosionNode->scale[2] = 0.0F;
 	explosionNode->data = explosion;
 	explosion->dx = radius / 5.0F;
-	addIntervalEventNode(explosionNode, 100, explosionInterval);
-	push(&scene.nodes, explosionNode);
-	PlaySound(TEXT("./assets/se_maoudamashii_retro12.wav"), NULL, SND_ASYNC | SND_FILENAME);
+	addIntervalEventNode(explosionNode, 0.1F, explosionInterval, NULL);
+	push(&gameScene.nodes, explosionNode);
+	PlaySoundNeo("./assets/se_maoudamashii_retro12.wav", FALSE);
 }
 
-static int bulletBehaviour(Node *node) {
+static int bulletBehaviour(Node *node, float elapsed) {
 	if(node->collisionFlags || distance2(heroNode.position, node->position) > 500 || node->position[2] < -100.0F) {
-		removeByData(&scene.nodes, node);
+		removeByData(&gameScene.nodes, node);
 		free(node);
 		return FALSE;
 	}
@@ -114,6 +114,7 @@ static void shootBullet(const char *name, Shape shape, const float position[3], 
 	Node *bullet = malloc(sizeof(Node));
 	*bullet = initNode(name, NO_IMAGE);
 	bullet->shape = shape;
+	bullet->collisionShape = shape;
 	bullet->velocity[0] = 400.0F * cosf(angle - PI / 2.0F);
 	bullet->velocity[2] = -400.0F * sinf(angle - PI / 2.0F);
 	bullet->angle[1] = angle;
@@ -122,22 +123,22 @@ static void shootBullet(const char *name, Shape shape, const float position[3], 
 	bullet->position[2] = position[2];
 	bullet->collisionMaskActive = collisionMask;
 	bullet->behaviour = bulletBehaviour;
-	push(&scene.nodes, bullet);
+	push(&gameScene.nodes, bullet);
 }
 
-static int enemy1Behaviour(Node *node) {
+static int enemy1Behaviour(Node *node, float elapsed) {
 	if(node->position[2] < -100.0F) {
-		removeByData(&scene.nodes, node);
+		removeByData(&gameScene.nodes, node);
 		free(node);
 		return FALSE;
 	}
 	if(node->collisionFlags & HERO_BULLET_COLLISIONMASK) {
 		Enemy1 *enemy = node->data;
 		enemy->hp -= 1;
-		cropImage(enemy->bar->texture, lifeBarBunch, 0, 10 * enemy->hp / 1);
+		cropImage(&enemy->bar->texture, &lifeBarBunch, 0, 10 * enemy->hp / 1);
 		if(enemy->hp <= 0) {
 			causeExplosion(node->position, 50.0F);
-			removeByData(&scene.nodes, node);
+			removeByData(&gameScene.nodes, node);
 			free(node);
 			score += 10;
 			return FALSE;
@@ -146,8 +147,9 @@ static int enemy1Behaviour(Node *node) {
 	return TRUE;
 }
 
-static void enemy1BehaviourInterval(Node *node) {
+static int enemy1BehaviourInterval(Node *node, void *data) {
 	shootBullet("enemyBullet", enemyBulletShape, node->position, PI, ENEMY_BULLET_COLLISIONMASK);
+	return TRUE;
 }
 
 static void spawnEnemy1(float x, float y, float z) {
@@ -156,11 +158,13 @@ static void spawnEnemy1(float x, float y, float z) {
 	Enemy1 *data = malloc(sizeof(Enemy1));
 	Image image = initImage(192, 32, BLACK, NULL_COLOR);
 	*enemy = initNode("enemy1", enemy1);
-	cropImage(image, lifeBarBunch, 0, 10);
+	cropImage(&image, &lifeBarBunch, 0, 10);
 	*bar = initNode("EnemyLifeBar", image);
 	data->hp = 1;
 	data->bar = bar;
 	enemy->shape = enemy1Shape;
+	enemy->collisionShape = enemy1CollisionShape;
+	enemy->collisionShape = enemy1Shape;
 	enemy->position[0] = x;
 	enemy->position[1] = y;
 	enemy->position[2] = z;
@@ -172,16 +176,16 @@ static void spawnEnemy1(float x, float y, float z) {
 	enemy->collisionMaskPassive = HERO_BULLET_COLLISIONMASK;
 	enemy->behaviour = enemy1Behaviour;
 	enemy->data = data;
-	addIntervalEventNode(enemy, 3000, enemy1BehaviourInterval);
+	addIntervalEventNode(enemy, 3.0F, enemy1BehaviourInterval, NULL);
 	bar->shape = enemyLifeShape;
-	bar->position[1] = -16.0F;
+	bar->position[1] = -16.0F / 50.0F;
 	push(&enemy->children, bar);
-	push(&scene.nodes, enemy);
+	push(&gameScene.nodes, enemy);
 }
 
-static int stoneBehaviour(Node *node) {
+static int stoneBehaviour(Node *node, float elapsed) {
 	if(node->position[2] < -100.0F) {
-		removeByData(&scene.nodes, node);
+		removeByData(&gameScene.nodes, node);
 		free(node);
 		return FALSE;
 	}
@@ -192,6 +196,7 @@ static void spawnStone(float x, float y, float z) {
 	Node *stone = malloc(sizeof(Node));
 	*stone = initNode("stone", stoneImage);
 	stone->shape = stoneShape;
+	stone->collisionShape = stoneShape;
 	stone->position[0] = x;
 	stone->position[1] = y;
 	stone->position[2] = z;
@@ -202,12 +207,12 @@ static void spawnStone(float x, float y, float z) {
 	stone->behaviour = stoneBehaviour;
 	stone->collisionMaskActive = OBSTACLE_COLLISIONMASK;
 	stone->collisionMaskPassive = HERO_BULLET_COLLISIONMASK | ENEMY_BULLET_COLLISIONMASK;
-	push(&scene.nodes, stone);
+	push(&gameScene.nodes, stone);
 }
 
 static void gameover(void) {
 	if(!start) {
-		push(&scene.nodes, &gameoverNode);
+		push(&gameScene.nodes, &gameoverNode);
 	}
 }
 
@@ -215,8 +220,8 @@ static void autoControl(void) {
 	Node *node;
 	autoMove[0] = 0.0F;
 	autoMove[1] = 0.0F;
-	resetIteration(&scene.nodes);
-	node = nextData(&scene.nodes);
+	resetIteration(&gameScene.nodes);
+	node = nextData(&gameScene.nodes);
 	while(node) {
 		float temp[2];
 		if(strcmp("enemy1", node->id) == 0) {
@@ -233,20 +238,20 @@ static void autoControl(void) {
 				subVec2(autoMove, node->position, autoMove);
 			}
 		}
-		node = nextData(&scene.nodes);
+		node = nextData(&gameScene.nodes);
 	}
 	normalize2(autoMove, autoMove);
 }
 
-static int heroBehaviour(Node *node) {
+static int heroBehaviour(Node *node, float elapsed) {
 	float move[2];
 	if(node->collisionFlags) {
 		if(node->collisionFlags & ENEMY_BULLET_COLLISIONMASK) heroHP -= 1;
 		if(node->collisionFlags & OBSTACLE_COLLISIONMASK) heroHP = 0;
-		cropImage(lifebarImage, lifeBarBunch, 0, heroHP);
+		cropImage(&lifebarImage, &lifeBarBunch, 0, heroHP);
 		if(heroHP <= 0) {
 			causeExplosion(node->position, 50.0F);
-			removeByData(&scene.nodes, node);
+			removeByData(&gameScene.nodes, node);
 			gameover();
 		}
 	}
@@ -264,21 +269,21 @@ static int heroBehaviour(Node *node) {
 		if((clock() - previousClock) * 1000 / CLOCKS_PER_SEC > 500) {
 			shootBullet("heroBullet", heroBulletShape, node->position, node->angle[1], HERO_BULLET_COLLISIONMASK);
 			controller.action = FALSE;
-			PlaySound(TEXT("assets/laser.wav"), NULL, SND_ASYNC | SND_FILENAME);
+			PlaySoundNeo("assets/laser.wav", FALSE);
 			previousClock = clock();
 		}
 	}
 	return TRUE;
 }
 
-static int scoreBehaviour(Node *node) {
+static int scoreBehaviour(Node *node, float elapsed) {
 	char buffer[11];
 	sprintf(buffer, "SCORE %04u", score);
-	drawTextSJIS(scoreImage, shnm12, 0, 0, buffer);
+	drawTextSJIS(node->texture, shnm12, 0, 0, buffer);
 	return TRUE;
 }
 
-static void sceneInterval() {
+static int gameSceneInterval() {
 	if(heroHP > 0) {
 		int x, y;
 		for(x = 0;x < 3;x++) {
@@ -300,42 +305,66 @@ static void sceneInterval() {
 		}
 		score += 5;
 	}
+	return TRUE;
 }
 
-static void initialize(void) {
-	initCNSG(SCREEN_SIZE, SCREEN_SIZE);
+static void startGame(void) {
+	heroHP = 10;
+	cropImage(&lifebarImage, &lifeBarBunch, 0, 10);
+	clearVec3(heroNode.position);
+
+	srand(0);
+
+	clearVector(&gameScene.nodes);
+	if(start) push(&gameScene.nodes, &startNode);
+	push(&gameScene.nodes, &lifeBarNode);
+	push(&gameScene.nodes, &scoreNode);
+	push(&gameScene.nodes, &heroNode);
+	push(&gameScene.nodes, &skyboxNode);
+	// push(&gameScene.nodes, &stageNode);
+	// resetSceneClock(&gameScene);
+	gameSceneInterval();
+	score = 0;
+}
+
+static void gameSceneBehaviour(Scene *scene, float elapsed) {
+	static float cameraBase[3] = { 0.0F, 25.0F, -100.0F };
+	float tempVec3[1][3];
+	mulVec3ByScalar(subVec3(heroNode.position, subVec3(scene->camera.position, cameraBase, tempVec3[0]), tempVec3[0]), 5.0F * elapsed, tempVec3[0]);
+	addVec3(scene->camera.position, tempVec3[0], scene->camera.position);
+	copyVec3(scene->camera.target, scene->camera.position);
+	scene->camera.target[2] = 0.0F;
+}
+
+static void initGame(void) {
 	shnm12 = initFontSJIS(loadBitmap("assets/shnm6x12r.bmp", NULL_COLOR), loadBitmap("assets/shnmk12.bmp", NULL_COLOR), 6, 12, 12);
 
-	keyboard = initController();
-	initControllerEventCross(wasd, 'W', 'A', 'S', 'D', controller.move);
-	action = initControllerEvent(VK_SPACE, 1.0F, 0.0F, &controller.action);
-	restart = initControllerEvent('R', 1.0F, 0.0F, &controller.retry);
-	quit = initControllerEvent(VK_ESCAPE, 1.0F, 0.0F, &controller.quit);
-	push(&keyboard.events, &wasd[0]);
-	push(&keyboard.events, &wasd[1]);
-	push(&keyboard.events, &wasd[2]);
-	push(&keyboard.events, &wasd[3]);
-	push(&keyboard.events, &action);
-	push(&keyboard.events, &restart);
-	push(&keyboard.events, &quit);
+	initControllerDataCross(NULL, 'W', 'A', 'S', 'D', controller.move);
+	initControllerData(VK_SPACE, 1.0F, 0.0F, &controller.action);
+	initControllerEvent('R', NULL, startGame);
+	initControllerEvent(VK_ESCAPE, NULL, deinitCNSG);
 
 	lifeBarBunch = loadBitmap("assets/lifebar.bmp", NULL_COLOR);
 	lifebarImage = initImage(192, 32, BLACK, NULL_COLOR);
-	cropImage(lifebarImage, lifeBarBunch, 0, 10);
+	cropImage(&lifebarImage, &lifeBarBunch, 0, 10);
 	hero = loadBitmap("assets/hero3d.bmp", NULL_COLOR);
 	heroBullet = loadBitmap("assets/heroBullet.bmp", WHITE);
 	enemy1 = loadBitmap("assets/enemy1.bmp", NULL_COLOR);
 	stoneImage = loadBitmap("assets/stone.bmp", NULL_COLOR);
 	stage = loadBitmap("assets/stage.bmp", NULL_COLOR);
 	explosionImage = loadBitmap("./assets/explosion.bmp", NULL_COLOR);
-	scene = initScene();
-	scene.camera = initCamera(0.0F, 0.0F, -100.0F, 1.0F);
-	scene.background = DARK_BLUE;
-	addIntervalEventScene(&scene, 5000, sceneInterval);
+	gameScene = initScene();
+	setCurrentScene(&gameScene, NULL, 0.0F);
+	initCamera(&gameScene.camera, 0.0F, 0.0F, -100.0F / 32.0F);
+	gameScene.camera.farLimit = 2000.0F;
+	gameScene.background = BLACK;
+	gameScene.behaviour = gameSceneBehaviour;
+	addIntervalEventScene(&gameScene, 5.0F, gameSceneInterval, NULL);
+	enemy1CollisionShape = initShapeBox(1.0F, 1.0F, 1.0F, MAGENTA);
 	initShapeFromObj(&enemy1Shape, "./assets/enemy1.obj");
 	initShapeFromObj(&stoneShape, "./assets/stone.obj");
 	initShapeFromObj(&explosionShape, "./assets/explosion.obj");
-	enemyLifeShape = initShapePlane(20, 5, RED);
+	enemyLifeShape = initShapePlane(20.0F / 50.0F, 5.0F / 50.0F, RED);
 	heroBulletShape = initShapeBox(5, 5, 30, YELLOW);
 	enemyBulletShape = initShapeBox(5, 5, 30, MAGENTA);
 	lifeBarNode = initNodeUI("lifeBarNode", lifebarImage, BLACK);
@@ -351,114 +380,41 @@ static void initialize(void) {
 	lifeBarNode.scale[1] = 5.0F;
 	heroNode = initNode("Hero", hero);
 	initShapeFromObj(&heroNode.shape, "./assets/hero.obj");
+	heroNode.collisionShape = heroNode.shape;
 	heroNode.scale[0] = 32.0F;
 	heroNode.scale[1] = 32.0F;
 	heroNode.scale[2] = 32.0F;
 	heroNode.collisionMaskPassive = ENEMY_BULLET_COLLISIONMASK | OBSTACLE_COLLISIONMASK;
 	heroNode.behaviour = heroBehaviour;
-	scene.camera.parent = &heroNode;
 	rayNode = initNode("ray", NO_IMAGE);
-	rayNode.shape = initShapeBox(3, 3, 512, RED);
-	rayNode.position[2] = 256.0F;
+	rayNode.shape = initShapeBox(3.0F / 32.0F, 3 / 32.0F, 512 / 32.0F, RED);
+	rayNode.position[2] = 256.0F / 32.0F;
 	push(&heroNode.children, &rayNode);
 
-	startImage = initImage(96, 48, BLACK, BLACK);
-	startNode = initNodeUI("gameover", startImage, BLACK);
-	startNode.scale[0] = 9600 / SCREEN_SIZE;
-	startNode.scale[1] = 4800 / SCREEN_SIZE;
-	startNode.position[0] = 50 - startNode.scale[0] / 2;
-	startNode.position[1] = 50 - startNode.scale[1] / 2;
-	drawTextSJIS(startImage, shnm12, 0, 0, "SPACE SHOOTER\n\n\"SPACE\"でプレイ\n\"ESC\"で終了");
+	skyboxNode = initNode("skybox", loadBitmap("./assets/skybox.bmp", MAGENTA));
+	initShapeFromObj(&skyboxNode.shape, "./assets/skybox.obj");
+	setVec3(skyboxNode.scale, 1000.0F, XYZ_MASK);
 
-	scoreImage = initImage(60, 12, BLACK, BLACK);
-	scoreNode = initNodeUI("score", scoreImage, NULL_COLOR);
-	scoreNode.position[0] = 100 - 6000 / 128;
-	scoreNode.scale[0] = 6000 / 128;
-	scoreNode.scale[1] = 1200 / 128;
-	scoreNode.behaviour = scoreBehaviour;
+	startNode = initNodeText("gameover", 0, 0, CENTER, CENTER, 96, 48, NULL);
+	drawTextSJIS(startNode.texture, shnm12, 0, 0, "SPACE SHOOTER\n\n\"SPACE\"でプレイ\n\"ESC\"で終了");
 
-	gameoverImage = initImage(84, 48, BLACK, BLACK);
-	gameoverNode = initNodeUI("gameover", gameoverImage, BLACK);
-	gameoverNode.scale[0] = 8400 / SCREEN_SIZE;
-	gameoverNode.scale[1] = 4800 / SCREEN_SIZE;
-	gameoverNode.position[0] = 50 - gameoverNode.scale[0] / 2;
-	gameoverNode.position[1] = 50 - gameoverNode.scale[1] / 2;
-	drawTextSJIS(gameoverImage, shnm12, 0, 0, "ゲームオーバー\n\n\"R\"でリプレイ\n\"ESC\"で終了");
+	scoreNode = initNodeText("score", 0, 0, RIGHT, TOP, 60, 12, scoreBehaviour);
+
+	gameoverNode = initNodeText("gameover", 0, 0, CENTER, CENTER, 84, 48, NULL);
+	drawTextSJIS(gameoverNode.texture, shnm12, 0, 0, "ゲームオーバー\n\n\"R\"でリプレイ\n\"ESC\"で終了");
 }
 
-static void startGame(void) {
-	heroHP = 10;
-	cropImage(lifebarImage, lifeBarBunch, 0, 10);
-	heroNode.position[0] = 0.0F;
-	heroNode.position[1] = 0.0F;
-	heroNode.position[2] = 0.0F;
-
-	srand(0);
-
-	clearVector(&scene.nodes);
-	if(start) push(&scene.nodes, &startNode);
-	push(&scene.nodes, &lifeBarNode);
-	push(&scene.nodes, &scoreNode);
-	push(&scene.nodes, &heroNode);
-	// push(&scene.nodes, &stageNode);
-	resetSceneClock(&scene);
-	sceneInterval();
-	score = 0;
-}
-
-static void deinitialize(void) {
-	discardShape(heroNode.shape);
-	discardShape(rayNode.shape);
-	discardShape(stageNode.shape);
-	discardShape(enemy1Shape);
-	discardShape(enemyLifeShape);
-	discardShape(heroBulletShape);
-	discardShape(enemyBulletShape);
-	discardShape(stoneShape);
-	discardShape(explosionShape);
-	discardNode(lifeBarNode);
-	discardNode(scoreNode);
-	discardNode(heroNode);
-	discardNode(stageNode);
-	discardNode(startNode);
-	freeImage(shnm12.font0201);
-	freeImage(shnm12.font0208);
-	freeImage(lifeBarBunch);
-	freeImage(lifebarImage);
-	freeImage(scoreImage);
-	freeImage(hero);
-	freeImage(heroBullet);
-	freeImage(stoneImage);
-	freeImage(startImage);
-	freeImage(gameoverImage);
-	freeImage(explosionImage);
-	discardScene(&scene);
-	deinitGraphics();
-}
-
-int main(void) {
-	clock_t previousClock;
-	initialize();
+int main(int argc, char *argv[]) {
+	initCNSG(argc, argv, WIDTH, HEIGHT);
+	initGame();
+	start = FALSE;
 	startGame();
-	previousClock = clock();
-	while(TRUE) {
-		updateController(keyboard);
-		if(controller.quit) break;
-		if(start) {
-			if(controller.action) {
-				start = FALSE;
-				startGame();
-			} else {
-				autoControl();
-			}
-		}
-		drawScene(&scene);
-		if(heroHP <= 0) {
-			if(controller.retry) startGame();
-		}
-		while(clock() - previousClock < CLOCKS_PER_SEC / FRAME_PER_SECOND);
-		previousClock = clock();
-	}
-	deinitialize();
+	gameLoop(FRAME_PER_SECOND);
+	// 		if(controller.action) {
+	// 			start = FALSE;
+	// 			startGame();
+	// 		} else {
+	// 			autoControl();
+	// 		}
 	return 0;
 }
