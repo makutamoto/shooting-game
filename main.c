@@ -31,7 +31,6 @@ static Image lifebarImage;
 static Image hero;
 static Image heroBullet;
 static Image enemy1;
-static Image stage;
 static Image stoneImage;
 static Image explosionImage;
 
@@ -48,7 +47,6 @@ static Node scoreNode;
 static Scene gameScene;
 static Node heroNode;
 static Node rayNode;
-static Node stageNode;
 static Node gameoverNode;
 static Node startNode;
 static Node skyboxNode;
@@ -56,6 +54,7 @@ static Node skyboxNode;
 BOOL start = TRUE;
 static unsigned int heroHP;
 static unsigned int score;
+static IntervalEventScene *gameSceneIntervalEvent;
 
 typedef struct {
 	int i;
@@ -279,7 +278,7 @@ static int heroBehaviour(Node *node, float elapsed) {
 static int scoreBehaviour(Node *node, float elapsed) {
 	char buffer[11];
 	sprintf(buffer, "SCORE %04u", score);
-	drawTextSJIS(node->texture, shnm12, 0, 0, buffer);
+	drawTextSJIS(&node->texture, &shnm12, 0, 0, buffer);
 	return TRUE;
 }
 
@@ -314,6 +313,7 @@ static void startGame(void) {
 	clearVec3(heroNode.position);
 
 	srand(0);
+	gameSceneIntervalEvent->counter = 0.0F;
 
 	clearVector(&gameScene.nodes);
 	if(start) push(&gameScene.nodes, &startNode);
@@ -321,8 +321,6 @@ static void startGame(void) {
 	push(&gameScene.nodes, &scoreNode);
 	push(&gameScene.nodes, &heroNode);
 	push(&gameScene.nodes, &skyboxNode);
-	// push(&gameScene.nodes, &stageNode);
-	// resetSceneClock(&gameScene);
 	gameSceneInterval();
 	score = 0;
 }
@@ -351,35 +349,28 @@ static void initGame(void) {
 	heroBullet = loadBitmap("assets/heroBullet.bmp", WHITE);
 	enemy1 = loadBitmap("assets/enemy1.bmp", NULL_COLOR);
 	stoneImage = loadBitmap("assets/stone.bmp", NULL_COLOR);
-	stage = loadBitmap("assets/stage.bmp", NULL_COLOR);
 	explosionImage = loadBitmap("./assets/explosion.bmp", NULL_COLOR);
 	gameScene = initScene();
 	setCurrentScene(&gameScene, NULL, 0.0F);
-	initCamera(&gameScene.camera, 0.0F, 0.0F, -100.0F / 32.0F);
+	gameScene.camera = initCamera(0.0F, 0.0F, -100.0F / 32.0F);
 	gameScene.camera.farLimit = 2000.0F;
 	gameScene.background = BLACK;
 	gameScene.behaviour = gameSceneBehaviour;
-	addIntervalEventScene(&gameScene, 5.0F, gameSceneInterval, NULL);
-	enemy1CollisionShape = initShapeBox(1.0F, 1.0F, 1.0F, MAGENTA);
-	initShapeFromObj(&enemy1Shape, "./assets/enemy1.obj");
-	initShapeFromObj(&stoneShape, "./assets/stone.obj");
-	initShapeFromObj(&explosionShape, "./assets/explosion.obj");
+	gameSceneIntervalEvent = addIntervalEventScene(&gameScene, 5.0F, gameSceneInterval, NULL);
+	enemy1CollisionShape = initShapeBox(1.0F, 2.0F, 1.0F, MAGENTA);
+	enemy1Shape = loadObj("./assets/enemy1.obj");
+	stoneShape = loadObj("./assets/stone.obj");
+	explosionShape = loadObj("./assets/explosion.obj");
 	enemyLifeShape = initShapePlane(20.0F / 50.0F, 5.0F / 50.0F, RED);
 	heroBulletShape = initShapeBox(5, 5, 30, YELLOW);
 	enemyBulletShape = initShapeBox(5, 5, 30, MAGENTA);
 	lifeBarNode = initNodeUI("lifeBarNode", lifebarImage, BLACK);
-	stageNode = initNode("stage", stage);
-	initShapeFromObj(&stageNode.shape, "./assets/test.obj");
-	stageNode.position[1] = -100.0F;
-	stageNode.position[2] = 0.0F;
-	stageNode.scale[0] = 10.0F;
-	stageNode.scale[2] = 10.0F;
 	lifeBarNode.position[0] = 2.5F;
 	lifeBarNode.position[1] = 2.5F;
 	lifeBarNode.scale[0] = 30.0F;
 	lifeBarNode.scale[1] = 5.0F;
 	heroNode = initNode("Hero", hero);
-	initShapeFromObj(&heroNode.shape, "./assets/hero.obj");
+	heroNode.shape = loadObj("./assets/hero.obj");
 	heroNode.collisionShape = heroNode.shape;
 	heroNode.scale[0] = 32.0F;
 	heroNode.scale[1] = 32.0F;
@@ -392,16 +383,16 @@ static void initGame(void) {
 	push(&heroNode.children, &rayNode);
 
 	skyboxNode = initNode("skybox", loadBitmap("./assets/skybox.bmp", MAGENTA));
-	initShapeFromObj(&skyboxNode.shape, "./assets/skybox.obj");
+	skyboxNode.shape = loadObj("./assets/skybox.obj");
 	setVec3(skyboxNode.scale, 1000.0F, XYZ_MASK);
 
 	startNode = initNodeText("gameover", 0, 0, CENTER, CENTER, 96, 48, NULL);
-	drawTextSJIS(startNode.texture, shnm12, 0, 0, "SPACE SHOOTER\n\n\"SPACE\"でプレイ\n\"ESC\"で終了");
+	drawTextSJIS(&startNode.texture, &shnm12, 0, 0, "SPACE SHOOTER\n\n\"SPACE\"でプレイ\n\"ESC\"で終了");
 
 	scoreNode = initNodeText("score", 0, 0, RIGHT, TOP, 60, 12, scoreBehaviour);
 
 	gameoverNode = initNodeText("gameover", 0, 0, CENTER, CENTER, 84, 48, NULL);
-	drawTextSJIS(gameoverNode.texture, shnm12, 0, 0, "ゲームオーバー\n\n\"R\"でリプレイ\n\"ESC\"で終了");
+	drawTextSJIS(&gameoverNode.texture, &shnm12, 0, 0, "ゲームオーバー\n\n\"R\"でリプレイ\n\"ESC\"で終了");
 }
 
 int main(int argc, char *argv[]) {
