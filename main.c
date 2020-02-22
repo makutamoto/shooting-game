@@ -29,7 +29,6 @@ static BOOL autoAction;
 static Image lifeBarBunch;
 static Image lifebarImage;
 static Image hero;
-static Image heroBullet;
 static Image enemy1;
 static Image stoneImage;
 static Image explosionImage;
@@ -346,7 +345,6 @@ static void initGame(void) {
 	lifebarImage = initImage(192, 32, BLACK, NULL_COLOR);
 	cropImage(&lifebarImage, &lifeBarBunch, 0, 10);
 	hero = loadBitmap("assets/hero3d.bmp", NULL_COLOR);
-	heroBullet = loadBitmap("assets/heroBullet.bmp", WHITE);
 	enemy1 = loadBitmap("assets/enemy1.bmp", NULL_COLOR);
 	stoneImage = loadBitmap("assets/stone.bmp", NULL_COLOR);
 	explosionImage = loadBitmap("./assets/explosion.bmp", NULL_COLOR);
